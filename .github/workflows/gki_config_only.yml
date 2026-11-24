@@ -1,0 +1,48 @@
+name: Config only probe
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_branch:
+        description: 'branch'
+        required: true
+        default: 'deprecated/android12-5.10-2023-01'
+jobs:
+  cfg:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential bc bison flex libssl-dev libelf-dev \
+            python3 git curl cpio rsync kmod device-tree-compiler clang-12 lld-12 llvm-12 gcc-aarch64-linux-gnu
+          sudo ln -sf /usr/bin/clang-12 /usr/local/bin/clang
+          sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld.lld
+          sudo ln -sf /usr/bin/llvm-ar-12 /usr/local/bin/llvm-ar
+          sudo ln -sf /usr/bin/llvm-nm-12 /usr/local/bin/llvm-nm
+          sudo ln -sf /usr/bin/llvm-objcopy-12 /usr/local/bin/llvm-objcopy
+          sudo ln -sf /usr/bin/llvm-strip-12 /usr/local/bin/llvm-strip
+      - name: clone
+        run: git clone --depth=1 -b "${{ github.event.inputs.kernel_branch }}" https://github.com/aosp-mirror/kernel_common gki
+      - name: configure with device config
+        run: |
+          cd gki
+          cp ../device-ref/device.config arch/arm64/configs/gki_defconfig
+          sed -i 's/^CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION=""/' arch/arm64/configs/gki_defconfig || true
+          make ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- gki_defconfig >/dev/null 2>&1
+          make ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- olddefconfig >/dev/null 2>&1
+          echo "=== RESULTING CONFIG KEY COUNT ==="
+          grep -c "^CONFIG_\|^# CONFIG_.* is not set" .config
+          echo "=== DIFF vs device (full) ==="
+          ./scripts/diffconfig ../device-ref/device.config .config > ../cfgdiff.txt || true
+          cat ../cfgdiff.txt
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cfgs
+          path: |
+            gki/.config
+            cfgdiff.txt
+          include-hidden-files: true
+          if-no-files-found: warn
