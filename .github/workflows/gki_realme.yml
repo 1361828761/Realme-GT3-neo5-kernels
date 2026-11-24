@@ -1,0 +1,148 @@
+name: Build GKI from realme T tree for Droidspaces
+on:
+  workflow_dispatch:
+    inputs:
+      use_device_config:
+        description: 'use device .config instead of realme gki_defconfig'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false','true']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential bc bison flex libssl-dev libelf-dev \
+            python3 git curl cpio rsync kmod device-tree-compiler clang-12 lld-12 llvm-12 \
+            gcc-aarch64-linux-gnu liblz4-tool zstd
+          sudo ln -sf /usr/bin/clang-12 /usr/local/bin/clang
+          sudo ln -sf /usr/bin/clang++-12 /usr/local/bin/clang++
+          sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld.lld
+          sudo ln -sf /usr/bin/llvm-ar-12 /usr/local/bin/llvm-ar
+          sudo ln -sf /usr/bin/llvm-nm-12 /usr/local/bin/llvm-nm
+          sudo ln -sf /usr/bin/llvm-objcopy-12 /usr/local/bin/llvm-objcopy
+          sudo ln -sf /usr/bin/llvm-objdump-12 /usr/local/bin/llvm-objdump
+          sudo ln -sf /usr/bin/llvm-strip-12 /usr/local/bin/llvm-strip
+          sudo ln -sf /usr/bin/llvm-readelf-12 /usr/local/bin/llvm-readelf
+
+      - name: Clone realme T kernel source
+        run: |
+          git clone --depth=1 -b master \
+            https://github.com/realme-kernel-opensource/realme_GTneo5-AndroidT-kernel-source gki
+          cd gki
+          echo "--- version ---"; head -5 Makefile
+          echo "--- gki_defconfig exists ---"; ls -la arch/arm64/configs/gki_defconfig
+          echo "--- has android_kabi.h ---"; ls -la include/linux/android_kabi.h
+
+      - name: Apply Droidspaces kABI patches
+        run: |
+          cd gki
+          patch -p1 -F3 --forward < ../kernel-patches/001-sysvipc-kabi.patch || echo "PATCH1 rc=$?"
+          patch -p1 -F3 --forward < ../kernel-patches/002-posix-mqueue-kabi.patch || echo "PATCH2 rc=$?"
+          echo "--- verify slots ---"
+          grep -n "ANDROID_KABI_USE(6" include/linux/sched.h || echo "NO SLOT6"
+          grep -n "ANDROID_KABI_USE(1, unsigned long mq_bytes)" include/linux/sched/user.h || echo "NO MQSLOT"
+          ls *.rej 2>/dev/null && echo "REJ EXIST" || echo "no rej"
+
+      - name: Patch gki_defconfig
+        run: |
+          cd gki
+          if [ "${{ github.event.inputs.use_device_config }}" = "true" ]; then
+            echo '>>> using full device .config'
+            cp ../device-ref/device.config arch/arm64/configs/gki_defconfig
+            sed -i 's/^CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION=""/' arch/arm64/configs/gki_defconfig || true
+            sed -i 's/^CONFIG_TRIM_UNUSED_KSYMS=y/# CONFIG_TRIM_UNUSED_KSYMS is not set/' arch/arm64/configs/gki_defconfig || true
+          fi
+          CFG=arch/arm64/configs/gki_defconfig
+          for c in CONFIG_SYSVIPC CONFIG_POSIX_MQUEUE CONFIG_IPC_NS CONFIG_PID_NS \
+                   CONFIG_DEVTMPFS CONFIG_NETFILTER_XT_MATCH_ADDRTYPE \
+                   CONFIG_USER_NS CONFIG_IP6_NF_NAT CONFIG_IP6_NF_TARGET_MASQUERADE CONFIG_MACVLAN \
+                   CONFIG_NETFILTER_XT_TARGET_LOG CONFIG_NETFILTER_XT_MATCH_RECENT CONFIG_NETFILTER_XT_SET \
+                   CONFIG_IP_SET CONFIG_IP_SET_HASH_IP CONFIG_IP_SET_HASH_NET \
+                   CONFIG_TMPFS_XATTR CONFIG_TMPFS_POSIX_ACL; do
+            if grep -q "^# $c is not set" $CFG; then
+              sed -i "s|^# $c is not set|$c=y|" $CFG
+            elif ! grep -q "^$c=" $CFG; then
+              echo "$c=y" >> $CFG
+            else
+              sed -i "s|^$c=.*|$c=y|" $CFG
+            fi
+          done
+
+      - name: Configure
+        run: |
+          cd gki
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          make ARCH=arm64 LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CLANG_TRIPLE=$CLANG_TRIPLE gki_defconfig
+          ./scripts/config --file .config -d DEBUG_INFO || true
+          ./scripts/config --file .config -d DEBUG_INFO_DWARF4 || true
+          ./scripts/config --file .config -d GDB_SCRIPTS || true
+          make ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- olddefconfig
+          echo "=== CONFIG DIFF vs device ==="
+          ./scripts/diffconfig ../device-ref/device.config .config | head -60 || true
+          echo "=== 关键项 ==="
+          for c in CONFIG_SYSVIPC CONFIG_POSIX_MQUEUE CONFIG_IPC_NS CONFIG_PID_NS CONFIG_DEVTMPFS \
+                   CONFIG_USER_NS CONFIG_IP_SET CONFIG_MACVLAN CONFIG_TMPFS_XATTR CONFIG_MODVERSIONS \
+                   CONFIG_LTO_CLANG_FULL CONFIG_CFI_CLANG CONFIG_TRIM_UNUSED_KSYMS CONFIG_NR_CPUS CONFIG_HZ; do
+            printf "%-38s " "$c"; grep "^$c=" .config || echo "NOT SET"
+          done
+
+      - name: Build Image
+        run: |
+          cd gki
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          make ARCH=arm64 LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CLANG_TRIPLE=$CLANG_TRIPLE -j$(nproc) Image 2>&1 | tail -40
+          ls -la arch/arm64/boot/Image vmlinux.symvers .config
+
+      - name: ABI self-check
+        run: |
+          cd gki
+          python3 - <<'PY'
+          import sys
+          def load(p):
+              d={}
+              for line in open(p,encoding='utf-8',errors='replace'):
+                  x=line.rstrip('\n').split('\t')
+                  if len(x)>=2 and x[0].startswith('0x'): d[x[1]]=int(x[0],16)
+              return d
+          new=load('vmlinux.symvers'); dev=load('../device-ref/vmlinux.symvers')
+          common=set(new)&set(dev); diff=[s for s in common if new[s]!=dev[s]]
+          ref={}
+          for line in open('../device-ref/crc_ref.txt',encoding='utf-8'):
+              x=line.rstrip('\n').split('\t')
+              if len(x)==2 and x[1].startswith('0x'): ref[x[0]]=int(x[1],16)
+          ok=[s for s in ref if s in new and new[s]==ref[s]]
+          bad=[s for s in ref if s in new and new[s]!=ref[s]]
+          miss=[s for s in ref if s not in new]
+          print(f'vs device GKI symvers : common={len(common)} crc_diff={len(diff)}')
+          print(f'vs vendor .ko crc_ref : ok={len(ok)} bad={len(bad)} missing={len(miss)}')
+          for s in sorted(bad)[:10]:
+              print(f'  BAD {s}: want {ref[s]:#010x} got {new[s]:#010x}')
+          if len(bad)==0 and len(ok)>=1100:
+              print('::notice::ABI MATCH - safe to flash')
+          else:
+              print(f'::warning::ABI MISMATCH ({len(bad)} conflicts)')
+          PY
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gki_realme
+          path: |
+            gki/arch/arm64/boot/Image
+            gki/vmlinux.symvers
+            gki/.config
+            gki/vmlinux
+          if-no-files-found: warn
