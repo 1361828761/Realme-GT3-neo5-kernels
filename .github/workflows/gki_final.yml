@@ -1,0 +1,113 @@
+name: GKI final (device config + force LTO/CFI)
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_branch:
+        required: true
+        default: 'deprecated/android12-5.10-2023-01'
+      with_kabi_patches:
+        required: true
+        default: 'false'
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential bc bison flex libssl-dev libelf-dev \
+            python3 git curl cpio rsync kmod device-tree-compiler clang-12 lld-12 llvm-12 gcc-aarch64-linux-gnu
+          sudo ln -sf /usr/bin/clang-12 /usr/local/bin/clang
+          sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld.lld
+          sudo ln -sf /usr/bin/llvm-ar-12 /usr/local/bin/llvm-ar
+          sudo ln -sf /usr/bin/llvm-nm-12 /usr/local/bin/llvm-nm
+          sudo ln -sf /usr/bin/llvm-objcopy-12 /usr/local/bin/llvm-objcopy
+          sudo ln -sf /usr/bin/llvm-objdump-12 /usr/local/bin/llvm-objdump
+          sudo ln -sf /usr/bin/llvm-strip-12 /usr/local/bin/llvm-strip
+          sudo ln -sf /usr/bin/llvm-readelf-12 /usr/local/bin/llvm-readelf
+      - name: clone
+        run: git clone --depth=1 -b "${{ github.event.inputs.kernel_branch }}" https://github.com/aosp-mirror/kernel_common gki
+      - name: force HAS_LTO_CLANG
+        run: |
+          cd gki
+          python3 - <<'PY'
+          s=open('arch/Kconfig').read()
+          i=s.find('config HAS_LTO_CLANG')
+          if i<0: raise SystemExit('no node')
+          j=s.find('\nconfig ',i+10)
+          k=s.find('\nchoice ',i+10)
+          if k>0 and k<j: j=k
+          blk=s[i:j]
+          out=[]
+          for ln in blk.split('\n'):
+              if ln.strip().startswith('depends on'):
+                  out.append('# [disabled] '+ln.strip())
+              elif ln.strip()=='def_bool y':
+                  out.append('\tbool'); out.append('\tdefault y')
+              else:
+                  out.append(ln)
+          open('arch/Kconfig','w').write(s[:i]+'\n'.join(out)+s[j:])
+          print('HAS_LTO_CLANG forced')
+          PY
+      - name: kabi patches
+        if: github.event.inputs.with_kabi_patches == 'true'
+        run: |
+          cd gki
+          patch -p1 -F3 --forward < ../kernel-patches/001-sysvipc-kabi.patch || true
+          patch -p1 -F3 --forward < ../kernel-patches/002-posix-mqueue-kabi.patch || true
+          grep -n "ANDROID_KABI_USE(6" include/linux/sched.h || echo NO_SLOT6
+          grep -n "ANDROID_KABI_USE(1, unsigned long mq_bytes)" include/linux/sched/user.h || echo NO_MQ
+      - name: configure
+        run: |
+          cd gki
+          cp ../device-ref/device.config arch/arm64/configs/gki_defconfig
+          make ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- gki_defconfig 2>&1 | tail -3
+          ./scripts/config --file .config -d TRIM_UNUSED_KSYMS -d MODULE_SIG_ALL -d MODULE_SIG -d DEBUG_INFO -d DEBUG_INFO_DWARF4
+          make ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- olddefconfig 2>&1 | tail -3
+          grep -E "^CONFIG_(HAS_LTO_CLANG|LTO_CLANG_FULL|CFI_CLANG|TRIM_UNUSED_KSYMS|SYSVIPC|POSIX_MQUEUE|IPC_NS|PID_NS|DEVTMPFS)=" .config | tee ../final_cfg.txt
+      - name: build
+        run: |
+          cd gki
+          make ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- -j$(nproc) Image 2>&1 | tail -25
+          ls -la arch/arm64/boot/Image vmlinux.symvers
+      - name: ABI check
+        run: |
+          cd gki
+          python3 - <<'PY'
+          dev={}
+          for ln in open('../device-ref/vmlinux.symvers'):
+              p=ln.split('\t')
+              if len(p)>=2: dev[p[1]]=p[0]
+          new={}
+          for ln in open('vmlinux.symvers'):
+              p=ln.split('\t')
+              if len(p)>=2: new[p[1]]=p[0]
+          common=[k for k in new if k in dev]
+          diff=[k for k in common if dev[k]!=new[k]]
+          print(f"vs device GKI symvers: new={len(new)} dev={len(dev)} common={len(common)} crc_diff={len(diff)}")
+          for k in diff[:25]: print(f"  DIFF {k}: dev={dev[k]} new={new[k]}")
+          ref={}
+          for ln in open('../device-ref/crc_ref.txt'):
+              p=ln.strip().split('\t')
+              if len(p)==2: ref[p[0]]=p[1]
+          ok=bad=miss=0; badlist=[]
+          for k,v in ref.items():
+              if k not in new: miss+=1
+              elif new[k].lower()==v.lower(): ok+=1
+              else: bad+=1; badlist.append(k)
+          print(f"vs vendor .ko crc_ref: ok={ok} bad={bad} missing={miss}")
+          for k in badlist[:25]: print(f"  BAD {k}: dev={ref[k]} new={new.get(k)}")
+          print("ABI MATCH" if bad==0 else "ABI MISMATCH")
+          PY
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: final
+          path: |
+            gki/arch/arm64/boot/Image
+            gki/vmlinux.symvers
+            gki/vmlinux
+            final_cfg.txt
+          if-no-files-found: warn
