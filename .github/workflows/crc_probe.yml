@@ -94,18 +94,29 @@ jobs:
           cd gki
           if [ -n "$TC" ]; then export PATH="$TC/bin:$PATH"; fi
           make ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- -j$(nproc) kernel/module.o drivers/base/core.o 2>&1 | tail -15
-          echo "=== CRC module_layout ==="
-          nm kernel/module.o 2>/dev/null | grep -i "__crc_module_layout" || echo "NOT FOUND module_layout"
-          echo "=== CRC devm_kmalloc / _dev_err (drivers/base/core.o) ==="
-          nm drivers/base/core.o 2>/dev/null | grep -iE "__crc_(devm_kmalloc|_dev_err|__class_create|device_initialize)\b" || echo "NOT FOUND"
-          echo "=== all __crc in core.o (first 20) ==="
-          nm drivers/base/core.o 2>/dev/null | grep "__crc_" | head -20
+          echo "=== symtypes files ==="
+          ls -la kernel/*.symtypes drivers/base/*.symtypes 2>/dev/null || echo "no symtypes"
+          echo "=== CRC from symtypes (module_layout dev=7c24b32d) ==="
+          { cat kernel/module.symtypes 2>/dev/null || echo "MISSING module.symtypes"; } > ../sym_module.txt
+          { cat drivers/base/core.symtypes 2>/dev/null || echo "MISSING core.symtypes"; } > ../sym_core.txt
+          wc -l ../sym_module.txt ../sym_core.txt
+          echo "--- module_layout ---"
+          grep -i "module_layout" ../sym_module.txt || echo "no module_layout in symtypes"
+          echo "--- devm_kmalloc / _dev_err / __class_create / device_initialize ---"
+          grep -iE "^(devm_kmalloc|_dev_err|__class_create|device_initialize)\b" ../sym_core.txt || echo "not matched"
+          echo "--- head of sym_module ---"
+          head -20 ../sym_module.txt
+          echo "--- head of sym_core ---"
+          head -20 ../sym_core.txt
 
       - name: upload keys
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: keycfg
-          path: keycfg.txt
+          path: |
+            keycfg.txt
+            sym_module.txt
+            sym_core.txt
           include-hidden-files: true
           if-no-files-found: warn
