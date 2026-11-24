@@ -320,6 +320,19 @@ jobs:
           chmod +x ./external/dtc/scripts/setlocalversion
                 # DOES NOT UPDATE WITH repo sync NO NEED TO OVERRIDE
 
+      - name: Apply Droidspaces kABI patches
+        run: |
+          cd ~/kernel_platform/common
+          set -x
+          echo "=== 001 SYSVIPC kABI padding ==="
+          patch -p1 -F3 --forward < "$GITHUB_WORKSPACE/kernel-patches/001-sysvipc-kabi.patch"
+          echo "=== 002 POSIX_MQUEUE kABI padding ==="
+          patch -p1 -F3 --forward < "$GITHUB_WORKSPACE/kernel-patches/002-posix-mqueue-kabi.patch"
+          echo "=== verify kabi slots ==="
+          grep -n "ANDROID_KABI_USE(6" include/linux/sched.h
+          grep -n "ANDROID_KABI_USE(1, unsigned long mq_bytes)" include/linux/sched/user.h
+          echo "=== done ==="
+
       - name: Initial Kernel tweaks (config)
         run: |
           cd ~/kernel_platform
@@ -372,6 +385,24 @@ jobs:
           CONFIG_IP_SET_HASH_NETIFACE=y
           CONFIG_IP_SET_LIST_SET=y
           EOF
+
+          # ===== Droidspaces config (official GKI list) =====
+          DSDEF=./common/arch/arm64/configs/gki_defconfig
+          for c in CONFIG_SYSVIPC CONFIG_POSIX_MQUEUE CONFIG_IPC_NS CONFIG_PID_NS \
+                   CONFIG_DEVTMPFS CONFIG_NETFILTER_XT_MATCH_ADDRTYPE \
+                   CONFIG_USER_NS CONFIG_IP6_NF_NAT CONFIG_IP6_NF_TARGET_MASQUERADE \
+                   CONFIG_MACVLAN CONFIG_IP_NF_TARGET_REJECT CONFIG_IP6_NF_TARGET_REJECT \
+                   CONFIG_NETFILTER_XT_TARGET_LOG CONFIG_NETFILTER_XT_MATCH_RECENT \
+                   CONFIG_NETFILTER_XT_SET CONFIG_IP_SET CONFIG_IP_SET_HASH_IP \
+                   CONFIG_IP_SET_HASH_NET CONFIG_TMPFS_XATTR CONFIG_TMPFS_POSIX_ACL; do
+            if grep -q "^# $c is not set" "$DSDEF"; then
+              sed -i "s/^# $c is not set/$c=y/" "$DSDEF"
+            elif ! grep -q "^$c=" "$DSDEF"; then
+              echo "$c=y" >> "$DSDEF"
+            fi
+          done
+          echo "=== Droidspaces config applied ==="
+          grep -E "^CONFIG_(SYSVIPC|POSIX_MQUEUE|IPC_NS|PID_NS|DEVTMPFS|MACVLAN|USER_NS|IP6_NF_NAT|NETFILTER_XT_SET)=" "$DSDEF" || true
 
           # Remove check_defconfig
           sed -i 's/check_defconfig//' ./common/build.config.gki
