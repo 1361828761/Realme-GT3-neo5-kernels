@@ -19,19 +19,19 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq build-essential bc bison flex libssl-dev libelf-dev \
             python3 git curl cpio rsync kmod device-tree-compiler \
-            clang-14 lld-14 llvm-14 gcc-aarch64-linux-gnu
-          clang-14 --version
-          ld.lld-14 --version
+            clang-12 lld-12 llvm-12 gcc-aarch64-linux-gnu
+          clang-12 --version
+          ld.lld-12 --version
           # 统一 unversioned 工具链名（Kconfig 里硬编码 ld.lld）
-          sudo ln -sf /usr/bin/clang-14        /usr/local/bin/clang
-          sudo ln -sf /usr/bin/clang++-14      /usr/local/bin/clang++
-          sudo ln -sf /usr/bin/ld.lld-14       /usr/local/bin/ld.lld
-          sudo ln -sf /usr/bin/llvm-ar-14      /usr/local/bin/llvm-ar
-          sudo ln -sf /usr/bin/llvm-nm-14      /usr/local/bin/llvm-nm
-          sudo ln -sf /usr/bin/llvm-objcopy-14 /usr/local/bin/llvm-objcopy
-          sudo ln -sf /usr/bin/llvm-objdump-14 /usr/local/bin/llvm-objdump
-          sudo ln -sf /usr/bin/llvm-strip-14   /usr/local/bin/llvm-strip
-          sudo ln -sf /usr/bin/llvm-readelf-14 /usr/local/bin/llvm-readelf
+          sudo ln -sf /usr/bin/clang-12        /usr/local/bin/clang
+          sudo ln -sf /usr/bin/clang++-12      /usr/local/bin/clang++
+          sudo ln -sf /usr/bin/ld.lld-12       /usr/local/bin/ld.lld
+          sudo ln -sf /usr/bin/llvm-ar-12      /usr/local/bin/llvm-ar
+          sudo ln -sf /usr/bin/llvm-nm-12      /usr/local/bin/llvm-nm
+          sudo ln -sf /usr/bin/llvm-objcopy-12 /usr/local/bin/llvm-objcopy
+          sudo ln -sf /usr/bin/llvm-objdump-12 /usr/local/bin/llvm-objdump
+          sudo ln -sf /usr/bin/llvm-strip-12   /usr/local/bin/llvm-strip
+          sudo ln -sf /usr/bin/llvm-readelf-12 /usr/local/bin/llvm-readelf
           which clang ld.lld llvm-ar llvm-nm llvm-objcopy
 
       - name: Clone GKI source
