@@ -19,7 +19,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq build-essential bc bison flex libssl-dev libelf-dev \
             python3 git curl cpio rsync kmod device-tree-compiler \
-            clang-14 lld-14 llvm-14
+            clang-14 lld-14 llvm-14 gcc-aarch64-linux-gnu
           clang-14 --version
           ld.lld-14 --version
           # 统一 unversioned 工具链名（Kconfig 里硬编码 ld.lld）
@@ -79,12 +79,14 @@ jobs:
       - name: Configure
         run: |
           cd gki
-          make ARCH=arm64 LLVM=1 gki_defconfig
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          make ARCH=arm64 LLVM=1 CROSS_COMPILE=$CROSS_COMPILE CLANG_TRIPLE=$CLANG_TRIPLE gki_defconfig
           # 仅关闭调试信息以加速编译；LTO/CFI/SCS 必须保留，否则厂商 .ko 因缺 __cfi_slowpath 拒绝加载
           ./scripts/config --file .config -d DEBUG_INFO || true
           ./scripts/config --file .config -d DEBUG_INFO_DWARF4 || true
           ./scripts/config --file .config -d GDB_SCRIPTS || true
-          make ARCH=arm64 LLVM=1 olddefconfig
+          make ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- olddefconfig
           echo "=== 关键项核对 ==="
           for c in CONFIG_SYSVIPC CONFIG_POSIX_MQUEUE CONFIG_IPC_NS CONFIG_PID_NS CONFIG_DEVTMPFS \
                    CONFIG_USER_NS CONFIG_IP_SET CONFIG_MACVLAN CONFIG_TMPFS_XATTR CONFIG_TMPFS_POSIX_ACL \
@@ -97,7 +99,7 @@ jobs:
         run: |
           cd gki
           set -o pipefail
-          make ARCH=arm64 LLVM=1 -j$(nproc) Image > build.log 2>&1 || {
+          make ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- -j$(nproc) Image > build.log 2>&1 || {
             echo "=== 编译失败，错误摘要 ==="
             grep -nE "error:|Error [0-9]|fatal|undefined|No rule" build.log | head -40
             echo "=== 最后 80 行 ==="
