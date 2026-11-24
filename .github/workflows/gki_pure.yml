@@ -80,15 +80,10 @@ jobs:
         run: |
           cd gki
           make ARCH=arm64 LLVM=1 gki_defconfig
-          # 关掉可能在纯 make 流程下不受支持的特性
-          ./scripts/config --file .config -d DEBUG_INFO_BTF || true
-          ./scripts/config --file .config -d DEBUG_INFO_BTF_MODULES || true
-          ./scripts/config --file .config -d LTO_CLANG_THIN || true
-          ./scripts/config --file .config -d LTO_CLANG_FULL || true
-          ./scripts/config --file .config -d CFI_CLANG || true
-          ./scripts/config --file .config -d MODULE_SIG_ALL || true
-          ./scripts/config --file .config -d SYSTEM_TRUSTED_KEYS || true
+          # 仅关闭调试信息以加速编译；LTO/CFI/SCS 必须保留，否则厂商 .ko 因缺 __cfi_slowpath 拒绝加载
           ./scripts/config --file .config -d DEBUG_INFO || true
+          ./scripts/config --file .config -d DEBUG_INFO_DWARF4 || true
+          ./scripts/config --file .config -d GDB_SCRIPTS || true
           make ARCH=arm64 LLVM=1 olddefconfig
           echo "=== 关键项核对 ==="
           for c in CONFIG_SYSVIPC CONFIG_POSIX_MQUEUE CONFIG_IPC_NS CONFIG_PID_NS CONFIG_DEVTMPFS \
