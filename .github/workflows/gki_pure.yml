@@ -109,8 +109,14 @@ jobs:
           echo "=== 编译成功 ==="
           tail -20 build.log
           ls -la arch/arm64/boot/Image
-          echo "=== Module.symvers ==="
-          ls -la Module.symvers && wc -l Module.symvers
+          echo "=== 导出符号表 (5.10 叫 vmlinux.symvers) ==="
+          ls -la vmlinux.symvers || true
+          wc -l vmlinux.symvers 2>/dev/null || true
+          ls -la Module.symvers 2>/dev/null || true
+          echo "=== 关键符号 CRC 抽查 ==="
+          grep -E "\b(__cfi_slowpath|__kmalloc|__stack_chk_fail|__arch_copy_from_user|__mutex_init)\b" vmlinux.symvers 2>/dev/null || echo "(未找到)"
+          echo "=== vmlinux 体积 ==="
+          ls -la vmlinux || true
 
       - name: Upload artifacts
         if: always()
@@ -119,6 +125,8 @@ jobs:
           name: gki_pure
           path: |
             gki/arch/arm64/boot/Image
+            gki/vmlinux.symvers
             gki/Module.symvers
             gki/.config
+            gki/vmlinux
           if-no-files-found: warn
