@@ -1,0 +1,110 @@
+name: Build Pure GKI 5.10 (android12-5.10) for Droidspaces
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_branch:
+        description: "GKI branch"
+        required: true
+        default: "android12-5.10"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential bc bison flex libssl-dev libelf-dev \
+            python3 git curl cpio rsync kmod device-tree-compiler \
+            clang-14 lld-14 llvm-14
+          clang-14 --version
+          ld.lld-14 --version
+
+      - name: Clone GKI source
+        run: |
+          git clone --depth=1 -b "${{ github.event.inputs.kernel_branch }}" \
+            https://github.com/aosp-mirror/kernel_common gki
+          cd gki
+          head -5 Makefile
+          echo "--- gki_defconfig exists? ---"
+          ls -la arch/arm64/configs/gki_defconfig
+
+      - name: Apply kABI patches
+        run: |
+          cd gki
+          patch -p1 -F3 --forward < ../kernel-patches/001-sysvipc-kabi.patch
+          patch -p1 -F3 --forward < ../kernel-patches/002-posix-mqueue-kabi.patch
+          echo "--- verify slots ---"
+          grep -n "ANDROID_KABI_USE(6" include/linux/sched.h
+          grep -n "ANDROID_KABI_USE(1, unsigned long mq_bytes)" include/linux/sched/user.h
+
+      - name: Patch gki_defconfig
+        run: |
+          cd gki
+          CFG=arch/arm64/configs/gki_defconfig
+          for c in CONFIG_SYSVIPC CONFIG_POSIX_MQUEUE CONFIG_IPC_NS CONFIG_PID_NS \
+                   CONFIG_DEVTMPFS CONFIG_NETFILTER_XT_MATCH_ADDRTYPE \
+                   CONFIG_USER_NS CONFIG_IP6_NF_NAT CONFIG_IP6_NF_TARGET_MASQUERADE CONFIG_MACVLAN \
+                   CONFIG_NETFILTER_XT_TARGET_LOG CONFIG_NETFILTER_XT_MATCH_RECENT CONFIG_NETFILTER_XT_SET \
+                   CONFIG_IP_SET CONFIG_IP_SET_HASH_IP CONFIG_IP_SET_HASH_NET \
+                   CONFIG_TMPFS_XATTR CONFIG_TMPFS_POSIX_ACL; do
+            if grep -q "^# $c is not set" $CFG; then
+              sed -i "s|^# $c is not set|$c=y|" $CFG
+            elif ! grep -q "^$c=" $CFG; then
+              echo "$c=y" >> $CFG
+            else
+              sed -i "s|^$c=.*|$c=y|" $CFG
+            fi
+          done
+          echo "--- final check ---"
+          for c in CONFIG_SYSVIPC CONFIG_POSIX_MQUEUE CONFIG_IPC_NS CONFIG_PID_NS CONFIG_DEVTMPFS \
+                   CONFIG_USER_NS CONFIG_IP_SET CONFIG_MACVLAN CONFIG_TMPFS_XATTR; do
+            grep -n "^$c=" $CFG || echo "MISSING: $c"
+          done
+
+      - name: Configure
+        run: |
+          cd gki
+          make ARCH=arm64 LLVM=-14 gki_defconfig
+          # 关掉可能在纯 make 流程下不受支持的特性
+          ./scripts/config --file .config -d DEBUG_INFO_BTF || true
+          ./scripts/config --file .config -d DEBUG_INFO_BTF_MODULES || true
+          ./scripts/config --file .config -d LTO_CLANG_THIN || true
+          ./scripts/config --file .config -d LTO_CLANG_FULL || true
+          ./scripts/config --file .config -d CFI_CLANG || true
+          ./scripts/config --file .config -d MODULE_SIG_ALL || true
+          ./scripts/config --file .config -d SYSTEM_TRUSTED_KEYS || true
+          ./scripts/config --file .config -d DEBUG_INFO || true
+          make ARCH=arm64 LLVM=-14 olddefconfig
+          echo "=== 关键项核对 ==="
+          for c in CONFIG_SYSVIPC CONFIG_POSIX_MQUEUE CONFIG_IPC_NS CONFIG_PID_NS CONFIG_DEVTMPFS \
+                   CONFIG_USER_NS CONFIG_IP_SET CONFIG_MACVLAN CONFIG_TMPFS_XATTR CONFIG_TMPFS_POSIX_ACL \
+                   CONFIG_NETFILTER_XT_MATCH_ADDRTYPE CONFIG_ANDROID_BINDERFS CONFIG_MODVERSIONS \
+                   CONFIG_MODULES CONFIG_SECCOMP_FILTER; do
+            printf "%-45s " "$c"; grep "^$c=" .config || echo "NOT SET"
+          done
+
+      - name: Build kernel
+        run: |
+          cd gki
+          set -o pipefail
+          make ARCH=arm64 LLVM=-14 -j$(nproc) Image 2>&1 | tail -80
+          echo "=== 产物 ==="
+          ls -la arch/arm64/boot/Image
+          echo "=== Module.symvers ==="
+          ls -la Module.symvers || echo "no Module.symvers"
+          wc -l Module.symvers 2>/dev/null || true
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gki_pure
+          path: |
+            gki/arch/arm64/boot/Image
+            gki/Module.symvers
+            gki/.config
+          if-no-files-found: warn
