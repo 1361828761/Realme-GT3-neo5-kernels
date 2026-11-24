@@ -97,12 +97,18 @@ jobs:
         run: |
           cd gki
           set -o pipefail
-          make ARCH=arm64 LLVM=1 -j$(nproc) Image 2>&1 | tail -80
-          echo "=== 产物 ==="
+          make ARCH=arm64 LLVM=1 -j$(nproc) Image > build.log 2>&1 || {
+            echo "=== 编译失败，错误摘要 ==="
+            grep -nE "error:|Error [0-9]|fatal|undefined|No rule" build.log | head -40
+            echo "=== 最后 80 行 ==="
+            tail -80 build.log
+            exit 1
+          }
+          echo "=== 编译成功 ==="
+          tail -20 build.log
           ls -la arch/arm64/boot/Image
           echo "=== Module.symvers ==="
-          ls -la Module.symvers || echo "no Module.symvers"
-          wc -l Module.symvers 2>/dev/null || true
+          ls -la Module.symvers && wc -l Module.symvers
 
       - name: Upload artifacts
         if: always()
