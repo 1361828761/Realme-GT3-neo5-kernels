@@ -3,6 +3,10 @@ name: Build Pure GKI 5.10 (android12-5.10) for Droidspaces
 on:
   workflow_dispatch:
     inputs:
+      use_device_config:
+        description: 'Use full device .config instead of gki_defconfig'
+        required: false
+        default: 'false'
       kernel_branch:
         description: "GKI branch"
         required: true
@@ -55,6 +59,12 @@ jobs:
       - name: Patch gki_defconfig
         run: |
           cd gki
+          if [ "${{ github.event.inputs.use_device_config }}" = "true" ]; then
+            echo '>>> using full device .config as base'
+            cp ../device-ref/device.config arch/arm64/configs/gki_defconfig
+            sed -i 's/^CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION=""/' arch/arm64/configs/gki_defconfig || true
+            sed -i 's/^CONFIG_TRIM_UNUSED_KSYMS=y/# CONFIG_TRIM_UNUSED_KSYMS is not set/' arch/arm64/configs/gki_defconfig || true
+          fi
           CFG=arch/arm64/configs/gki_defconfig
           for c in CONFIG_SYSVIPC CONFIG_POSIX_MQUEUE CONFIG_IPC_NS CONFIG_PID_NS \
                    CONFIG_DEVTMPFS CONFIG_NETFILTER_XT_MATCH_ADDRTYPE \
@@ -117,6 +127,47 @@ jobs:
           grep -E "\b(__cfi_slowpath|__kmalloc|__stack_chk_fail|__arch_copy_from_user|__mutex_init)\b" vmlinux.symvers 2>/dev/null || echo "(未找到)"
           echo "=== vmlinux 体积 ==="
           ls -la vmlinux || true
+
+      - name: ABI self-check against device reference
+        run: |
+          python3 - <<'PY'
+          import sys
+          def load_sv(p):
+              d={}
+              for line in open(p,encoding='utf-8',errors='replace'):
+                  x=line.rstrip('\n').split('\t')
+                  if len(x)>=2 and x[0].startswith('0x'): d[x[1]]=int(x[0],16)
+              return d
+          def load_ref(p):
+              d={}
+              for line in open(p,encoding='utf-8',errors='replace'):
+                  x=line.rstrip('\n').split('\t')
+                  if len(x)>=2: d[x[0]]=int(x[1].split(',')[0],16)
+              return d
+          try:
+              new=load_sv('gki/vmlinux.symvers')
+          except Exception as e:
+              print('::error::no symvers',e); sys.exit(1)
+          dev=load_sv('device-ref/vmlinux.symvers')
+          ref=load_ref('device-ref/crc_ref.txt')
+          common=set(new)&set(dev)
+          diff=[s for s in common if new[s]!=dev[s]]
+          ok=bad=miss=0
+          for s,c in ref.items():
+              if s not in new: miss+=1
+              elif new[s]==c: ok+=1
+              else: bad+=1
+          print(f'=== ABI SELF-CHECK ===')
+          print(f'vs device GKI symvers : common={len(common)} crc_diff={len(diff)}')
+          print(f'vs vendor .ko crc_ref : ok={ok} bad={bad} missing={miss}')
+          if bad==0 and ok>=1100:
+              print('::notice::ABI MATCH - kernel is safe to flash')
+          else:
+              print(f'::warning::ABI MISMATCH - do NOT flash ({bad} conflicts)')
+          with open('abi_report.txt','w') as f:
+              f.write(f'common={len(common)} crc_diff={len(diff)} ok={ok} bad={bad} missing={miss}\n')
+          PY
+          echo "--- report ---"; cat abi_report.txt
 
       - name: Upload artifacts
         if: always()
