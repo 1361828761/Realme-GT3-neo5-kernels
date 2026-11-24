@@ -22,6 +22,17 @@ jobs:
             clang-14 lld-14 llvm-14
           clang-14 --version
           ld.lld-14 --version
+          # 统一 unversioned 工具链名（Kconfig 里硬编码 ld.lld）
+          sudo ln -sf /usr/bin/clang-14        /usr/local/bin/clang
+          sudo ln -sf /usr/bin/clang++-14      /usr/local/bin/clang++
+          sudo ln -sf /usr/bin/ld.lld-14       /usr/local/bin/ld.lld
+          sudo ln -sf /usr/bin/llvm-ar-14      /usr/local/bin/llvm-ar
+          sudo ln -sf /usr/bin/llvm-nm-14      /usr/local/bin/llvm-nm
+          sudo ln -sf /usr/bin/llvm-objcopy-14 /usr/local/bin/llvm-objcopy
+          sudo ln -sf /usr/bin/llvm-objdump-14 /usr/local/bin/llvm-objdump
+          sudo ln -sf /usr/bin/llvm-strip-14   /usr/local/bin/llvm-strip
+          sudo ln -sf /usr/bin/llvm-readelf-14 /usr/local/bin/llvm-readelf
+          which clang ld.lld llvm-ar llvm-nm llvm-objcopy
 
       - name: Clone GKI source
         run: |
@@ -68,7 +79,7 @@ jobs:
       - name: Configure
         run: |
           cd gki
-          make ARCH=arm64 LLVM=-14 gki_defconfig
+          make ARCH=arm64 LLVM=1 gki_defconfig
           # 关掉可能在纯 make 流程下不受支持的特性
           ./scripts/config --file .config -d DEBUG_INFO_BTF || true
           ./scripts/config --file .config -d DEBUG_INFO_BTF_MODULES || true
@@ -78,7 +89,7 @@ jobs:
           ./scripts/config --file .config -d MODULE_SIG_ALL || true
           ./scripts/config --file .config -d SYSTEM_TRUSTED_KEYS || true
           ./scripts/config --file .config -d DEBUG_INFO || true
-          make ARCH=arm64 LLVM=-14 olddefconfig
+          make ARCH=arm64 LLVM=1 olddefconfig
           echo "=== 关键项核对 ==="
           for c in CONFIG_SYSVIPC CONFIG_POSIX_MQUEUE CONFIG_IPC_NS CONFIG_PID_NS CONFIG_DEVTMPFS \
                    CONFIG_USER_NS CONFIG_IP_SET CONFIG_MACVLAN CONFIG_TMPFS_XATTR CONFIG_TMPFS_POSIX_ACL \
@@ -91,7 +102,7 @@ jobs:
         run: |
           cd gki
           set -o pipefail
-          make ARCH=arm64 LLVM=-14 -j$(nproc) Image 2>&1 | tail -80
+          make ARCH=arm64 LLVM=1 -j$(nproc) Image 2>&1 | tail -80
           echo "=== 产物 ==="
           ls -la arch/arm64/boot/Image
           echo "=== Module.symvers ==="
