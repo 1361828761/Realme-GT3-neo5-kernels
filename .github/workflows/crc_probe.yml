@@ -56,11 +56,21 @@ jobs:
           i=s.find('config HAS_LTO_CLANG')
           if i<0: raise SystemExit('no node')
           j=s.find('\nconfig ',i+10)
+          k=s.find('\nchoice ',i+10)
+          if k>0 and k<j: j=k
           blk=s[i:j]
-          new='config HAS_LTO_CLANG\n\tbool\n\tdefault y\n'
-          s=s[:i]+new+s[j:]
+          out=[]
+          for ln in blk.split('\n'):
+              if ln.strip().startswith('depends on'):
+                  out.append('# [disabled] '+ln.strip())
+              elif ln.strip()=='def_bool y':
+                  out.append('\tbool')
+                  out.append('\tdefault y')
+              else:
+                  out.append(ln)
+          s=s[:i]+'\n'.join(out)+s[j:]
           open('arch/Kconfig','w').write(s)
-          print('REPLACED HAS_LTO_CLANG -> always y')
+          print('REWRITTEN HAS_LTO_CLANG (depends disabled, default y)')
           PY
           grep -n -A4 "^config HAS_LTO_CLANG" arch/Kconfig
       - name: config
@@ -69,8 +79,8 @@ jobs:
           cp ../device-ref/device.config arch/arm64/configs/gki_defconfig
           TCENV=""
           if [ -n "$TC" ]; then export PATH="$TC/bin:$PATH"; TCENV="LLVM=1"; fi
-          make ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- gki_defconfig >/dev/null 2>&1 || true
-          make ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- olddefconfig >/dev/null 2>&1 || true
+          make ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- gki_defconfig 2>&1 | tail -5
+          make ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- olddefconfig 2>&1 | tail -5
           echo "=== compiler ==="; make ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- -s --no-print-directory -p 2>/dev/null | grep -m1 '^CC_IS_CLANG' || true
           echo "=== HAS_LTO_CLANG block ==="
           grep -n -A10 "^config HAS_LTO_CLANG" arch/Kconfig
