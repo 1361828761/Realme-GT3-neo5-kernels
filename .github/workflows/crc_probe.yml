@@ -83,7 +83,7 @@ jobs:
           ./scripts/config --file .config -d TRIM_UNUSED_KSYMS
           ./scripts/config --file .config -d MODULE_SIG_ALL -d MODULE_SIG
           make ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- olddefconfig 2>&1 | tail -5
-          echo "=== compiler ==="; make ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- -s --no-print-directory -p 2>/dev/null | grep -m1 '^CC_IS_CLANG' || true
+          echo "=== compiler ==="; which clang; clang --version | head -2; which ld.lld; ld.lld --version | head -1
           echo "=== HAS_LTO_CLANG block ==="
           grep -n -A10 "^config HAS_LTO_CLANG" arch/Kconfig
           echo "=== LTO/CFI ==="
