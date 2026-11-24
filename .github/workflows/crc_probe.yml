@@ -1,0 +1,89 @@
+name: CRC probe (single object)
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_branch:
+        required: true
+        default: 'deprecated/android12-5.10-2023-01'
+      force_lto:
+        description: 'true = patch Kconfig to allow LTO/CFI'
+        required: true
+        default: 'true'
+      android_clang:
+        description: 'true = use Android clang-r416183b'
+        required: true
+        default: 'false'
+jobs:
+  probe:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential bc bison flex libssl-dev libelf-dev \
+            python3 git curl cpio rsync kmod device-tree-compiler gcc-aarch64-linux-gnu unzip
+          if [ "${{ github.event.inputs.android_clang }}" != "true" ]; then
+            sudo apt-get install -y -qq clang-12 lld-12 llvm-12
+            sudo ln -sf /usr/bin/clang-12 /usr/local/bin/clang
+            sudo ln -sf /usr/bin/ld.lld-12 /usr/local/bin/ld.lld
+            sudo ln -sf /usr/bin/llvm-ar-12 /usr/local/bin/llvm-ar
+            sudo ln -sf /usr/bin/llvm-nm-12 /usr/local/bin/llvm-nm
+            sudo ln -sf /usr/bin/llvm-objcopy-12 /usr/local/bin/llvm-objcopy
+            sudo ln -sf /usr/bin/llvm-strip-12 /usr/local/bin/llvm-strip
+            sudo ln -sf /usr/bin/llvm-objdump-12 /usr/local/bin/llvm-objdump
+            sudo ln -sf /usr/bin/llvm-readelf-12 /usr/local/bin/llvm-readelf
+          fi
+      - name: fetch android clang
+        if: github.event.inputs.android_clang == 'true'
+        run: |
+          mkdir -p $HOME/tc
+          cd $HOME/tc
+          curl -sSL -o clang.zip "https://github.com/LineageOS/android_prebuilts_clang_host_linux-x86_clang-r416183b/archive/refs/heads/android-13.0.0_r1.zip"
+          unzip -q clang.zip
+          D=$(ls -d android_prebuilts_clang_host_linux-x86_clang-r416183b-*/clang-r416183b 2>/dev/null | head -1)
+          echo "TC=$HOME/tc/$D" >> $GITHUB_ENV
+          ls "$HOME/tc/$D/bin" | head -5
+      - name: clone
+        run: git clone --depth=1 -b "${{ github.event.inputs.kernel_branch }}" https://github.com/aosp-mirror/kernel_common gki
+      - name: force LTO/Kconfig relax
+        if: github.event.inputs.force_lto == 'true'
+        run: |
+          cd gki
+          sed -i 's/^config HAS_LTO_CLANG$/config HAS_LTO_CLANG\n\tdef_bool y\n\tselect SKIP_IF_MISSING/' arch/Kconfig 2>/dev/null || true
+          echo "--- before ---"; grep -n -A8 "^config HAS_LTO_CLANG" arch/Kconfig
+          python3 - <<'PY'
+          import re
+          s=open('arch/Kconfig').read()
+          i=s.find('config HAS_LTO_CLANG')
+          if i<0: raise SystemExit('no node')
+          j=s.find('\nconfig ',i+10)
+          blk=s[i:j]
+          new='config HAS_LTO_CLANG\n\tbool\n\tdefault y\n'
+          s=s[:i]+new+s[j:]
+          open('arch/Kconfig','w').write(s)
+          print('REPLACED HAS_LTO_CLANG -> always y')
+          PY
+          grep -n -A4 "^config HAS_LTO_CLANG" arch/Kconfig
+      - name: config
+        run: |
+          cd gki
+          cp ../device-ref/device.config arch/arm64/configs/gki_defconfig
+          TCENV=""
+          if [ -n "$TC" ]; then export PATH="$TC/bin:$PATH"; TCENV="LLVM=1"; fi
+          make ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- gki_defconfig >/dev/null 2>&1 || true
+          make ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- olddefconfig >/dev/null 2>&1 || true
+          echo "=== compiler ==="; make ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- -s --no-print-directory -p 2>/dev/null | grep -m1 '^CC_IS_CLANG' || true
+          echo "=== LTO/CFI ==="
+          grep -E "^CONFIG_(HAS_LTO_CLANG|LTO|LTO_CLANG|LTO_CLANG_FULL|LTO_CLANG_THIN|LTO_NONE|CFI_CLANG|CFI_CLANG_SHADOW|CFI_PERMISSIVE|CC_VERSION_TEXT|CLANG_VERSION|WERROR)" .config || echo "none"
+      - name: build two objects
+        run: |
+          cd gki
+          if [ -n "$TC" ]; then export PATH="$TC/bin:$PATH"; fi
+          make ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- -j$(nproc) kernel/module.o drivers/base/core.o 2>&1 | tail -15
+          echo "=== CRC module_layout ==="
+          nm kernel/module.o 2>/dev/null | grep -i "__crc_module_layout" || echo "NOT FOUND module_layout"
+          echo "=== CRC devm_kmalloc / _dev_err (drivers/base/core.o) ==="
+          nm drivers/base/core.o 2>/dev/null | grep -iE "__crc_(devm_kmalloc|_dev_err|__class_create|device_initialize)\b" || echo "NOT FOUND"
+          echo "=== all __crc in core.o (first 20) ==="
+          nm drivers/base/core.o 2>/dev/null | grep "__crc_" | head -20
