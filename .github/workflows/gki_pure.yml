@@ -97,6 +97,19 @@ jobs:
           ./scripts/config --file .config -d DEBUG_INFO_DWARF4 || true
           ./scripts/config --file .config -d GDB_SCRIPTS || true
           make ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- olddefconfig
+          echo "=== CONFIG DIFF vs device (前80项) ==="
+          if [ -f ../device-ref/device.config ]; then
+            ./scripts/diffconfig ../device-ref/device.config .config | head -80 || true
+          fi
+          echo "=== struct device / page 布局关键项实测值 ==="
+          for c in CONFIG_PM CONFIG_PM_SLEEP CONFIG_PM_CLK CONFIG_PM_GENERIC_DOMAINS CONFIG_PM_OPP \
+                   CONFIG_OF CONFIG_OF_IRQ CONFIG_IOMMU_API CONFIG_GENERIC_MSI_IRQ CONFIG_DMA_OPS \
+                   CONFIG_DMA_SHARED_BUFFER CONFIG_SUSPEND CONFIG_NUMA CONFIG_SMP CONFIG_NR_CPUS \
+                   CONFIG_HZ CONFIG_ARM64_VA_BITS CONFIG_PGTABLE_LEVELS CONFIG_MEMCG CONFIG_SWAP \
+                   CONFIG_LTO_CLANG_THIN CONFIG_LTO_CLANG_FULL CONFIG_CFI_CLANG CONFIG_MODVERSIONS \
+                   CONFIG_TRIM_UNUSED_KSYMS CONFIG_DEBUG_LIST CONFIG_PAGE_OWNER CONFIG_PAGE_EXTENSION; do
+            printf "%-34s " "$c"; grep "^$c=" .config || echo "NOT SET"
+          done
           echo "=== 关键项核对 ==="
           for c in CONFIG_SYSVIPC CONFIG_POSIX_MQUEUE CONFIG_IPC_NS CONFIG_PID_NS CONFIG_DEVTMPFS \
                    CONFIG_USER_NS CONFIG_IP_SET CONFIG_MACVLAN CONFIG_TMPFS_XATTR CONFIG_TMPFS_POSIX_ACL \
