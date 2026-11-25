@@ -103,6 +103,12 @@ jobs:
             mqueue_only)
               for c in POSIX_MQUEUE; do ./scripts/config --file .config -e $c; done
               ;;
+            no_sysvipc)
+              for c in POSIX_MQUEUE IPC_NS PID_NS DEVTMPFS; do ./scripts/config --file .config -e $c; done
+              ;;
+            no_sysvipc_nodevtmpfs)
+              for c in POSIX_MQUEUE IPC_NS PID_NS; do ./scripts/config --file .config -e $c; done
+              ;;
             devtmpfs)
               for c in DEVTMPFS; do ./scripts/config --file .config -e $c; done
               ;;
