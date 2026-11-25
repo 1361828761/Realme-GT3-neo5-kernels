@@ -80,6 +80,18 @@ jobs:
             core)
               for c in SYSVIPC POSIX_MQUEUE IPC_NS PID_NS; do ./scripts/config --file .config -e $c; done
               ;;
+            sysvipc)
+              for c in SYSVIPC POSIX_MQUEUE; do ./scripts/config --file .config -e $c; done
+              ;;
+            ns)
+              for c in IPC_NS PID_NS; do ./scripts/config --file .config -e $c; done
+              ;;
+            sysvipc_only)
+              for c in SYSVIPC; do ./scripts/config --file .config -e $c; done
+              ;;
+            mqueue_only)
+              for c in POSIX_MQUEUE; do ./scripts/config --file .config -e $c; done
+              ;;
             devtmpfs)
               for c in DEVTMPFS; do ./scripts/config --file .config -e $c; done
               ;;
