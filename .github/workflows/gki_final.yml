@@ -72,11 +72,37 @@ jobs:
           done
           make ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- olddefconfig 2>&1 | tail -3
           grep -E "^CONFIG_(HAS_LTO_CLANG|LTO_CLANG_FULL|CFI_CLANG|TRIM_UNUSED_KSYMS|SYSVIPC|POSIX_MQUEUE|IPC_NS|PID_NS|DEVTMPFS)=" .config | tee ../final_cfg.txt
+      - name: force exact vermagic (critical for vendor .ko load)
+        run: |
+          cd gki
+          # The stock device kernel reports:
+          #   Linux version 5.10.149-android12-9-o-g36dae0b389f6
+          # module loader compares vermagic as a strict string, so ANY deviation
+          # (e.g. the "-dirty" that a patched tree produces) makes every vendor
+          # .ko fail with "version magic mismatch" -> early boot loop, no adbd.
+          # Neutralise scripts/setlocalversion so the git-dirty suffix can never
+          # be appended, and pin CONFIG_LOCALVERSION to the device value.
+          sed -i '/^CONFIG_LOCALVERSION=/d' .config
+          ./scripts/config --file .config -d LOCALVERSION_AUTO
+          echo 'CONFIG_LOCALVERSION="-android12-9-o-g36dae0b389f6"' >> .config
+          printf '#!/bin/sh\necho "-android12-9-o-g36dae0b389f6"\n' > scripts/setlocalversion
+          chmod +x scripts/setlocalversion
+          rm -f include/config/kernel.release
+          echo "--- kernel.release preview (regenerated at build) ---"
+          grep -E '^CONFIG_(LOCALVERSION|LOCALVERSION_AUTO|PREEMPT|SMP|MODVERSIONS|MODULE_UNLOAD)' .config
       - name: build
         run: |
           cd gki
           make ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- -j$(nproc) Image 2>&1 | tail -25
           ls -la arch/arm64/boot/Image vmlinux.symvers
+          echo "--- UTS_RELEASE / vermagic gate ---"
+          echo "kernel.release = $(cat include/config/kernel.release)"
+          strings arch/arm64/boot/Image | grep -m1 'Linux version'
+          if [ "$(cat include/config/kernel.release)" != "5.10.149-android12-9-o-g36dae0b389f6" ]; then
+            echo "::error::UTS_RELEASE mismatch - vendor modules would be rejected"
+            exit 1
+          fi
+          echo "::notice::UTS_RELEASE matches device exactly"
       - name: ABI check
         run: |
           cd gki
