@@ -11,6 +11,10 @@ on:
       with_droidspaces_cfg:
         required: true
         default: 'true'
+      cfg_set:
+        description: 'none | core | devtmpfs | full'
+        required: true
+        default: 'core'
 jobs:
   build:
     runs-on: ubuntu-22.04
@@ -67,16 +71,30 @@ jobs:
           cp ../device-ref/device.config arch/arm64/configs/gki_defconfig
           make ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- gki_defconfig 2>&1 | tail -3
           ./scripts/config --file .config -d TRIM_UNUSED_KSYMS -d MODULE_SIG_ALL -d MODULE_SIG -d DEBUG_INFO -d DEBUG_INFO_DWARF4
-          if [ "${{ github.event.inputs.with_droidspaces_cfg }}" = "true" ]; then
-            for c in SYSVIPC POSIX_MQUEUE IPC_NS PID_NS DEVTMPFS NETFILTER_XT_MATCH_ADDRTYPE \
-                     USER_NS IP6_NF_NAT IP6_NF_TARGET_MASQUERADE MACVLAN \
-                     NETFILTER_XT_TARGET_LOG NETFILTER_XT_MATCH_RECENT NETFILTER_XT_SET \
-                     IP_SET IP_SET_HASH_IP IP_SET_HASH_NET TMPFS_XATTR TMPFS_POSIX_ACL; do
-              ./scripts/config --file .config -e $c
-            done
-          else
-            echo "droidspaces configs SKIPPED - pure device.config"
-          fi
+          CS="${{ github.event.inputs.cfg_set }}"
+          echo "cfg_set = $CS"
+          case "$CS" in
+            none)
+              echo "core configs SKIPPED - pure device.config (=vC, known bootable)"
+              ;;
+            core)
+              for c in SYSVIPC POSIX_MQUEUE IPC_NS PID_NS; do ./scripts/config --file .config -e $c; done
+              ;;
+            devtmpfs)
+              for c in DEVTMPFS; do ./scripts/config --file .config -e $c; done
+              ;;
+            full)
+              for c in SYSVIPC POSIX_MQUEUE IPC_NS PID_NS DEVTMPFS NETFILTER_XT_MATCH_ADDRTYPE \
+                       USER_NS IP6_NF_NAT IP6_NF_TARGET_MASQUERADE MACVLAN \
+                       NETFILTER_XT_TARGET_LOG NETFILTER_XT_MATCH_RECENT NETFILTER_XT_SET \
+                       IP_SET IP_SET_HASH_IP IP_SET_HASH_NET TMPFS_XATTR TMPFS_POSIX_ACL; do
+                ./scripts/config --file .config -e $c
+              done
+              ;;
+            *)
+              echo "unknown cfg_set: $CS"; exit 1
+              ;;
+          esac
           make ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- olddefconfig 2>&1 | tail -3
           grep -E "^CONFIG_(HAS_LTO_CLANG|LTO_CLANG_FULL|CFI_CLANG|TRIM_UNUSED_KSYMS|SYSVIPC|POSIX_MQUEUE|IPC_NS|PID_NS|DEVTMPFS)=" .config | tee ../final_cfg.txt
       - name: force exact vermagic (critical for vendor .ko load)
@@ -145,7 +163,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: final-kabi${{ github.event.inputs.with_kabi_patches }}-ds${{ github.event.inputs.with_droidspaces_cfg }}
+          name: final-kabi${{ github.event.inputs.with_kabi_patches }}-cfg-${{ github.event.inputs.cfg_set }}
           path: |
             gki/arch/arm64/boot/Image
             gki/vmlinux.symvers
