@@ -61,10 +61,21 @@ jobs:
         if: github.event.inputs.with_kabi_patches == 'true'
         run: |
           cd gki
-          patch -p1 -F3 --forward < ../kernel-patches/001-sysvipc-kabi.patch || true
-          patch -p1 -F3 --forward < ../kernel-patches/002-posix-mqueue-kabi.patch || true
-          grep -n "ANDROID_KABI_USE(6" include/linux/sched.h || echo NO_SLOT6
-          grep -n "ANDROID_KABI_USE(1, unsigned long mq_bytes)" include/linux/sched/user.h || echo NO_MQ
+          echo "=== BEFORE: original field locations ==="
+          grep -n "struct sysv_sem\|struct sysv_shm" include/linux/sched.h | head -5 || true
+          grep -n "unsigned long mq_bytes" include/linux/sched/user.h | head -3 || true
+          echo "=== APPLY 001 ==="
+          patch -p1 -F3 --forward < ../kernel-patches/001-sysvipc-kabi.patch
+          echo "001 exit=$?"
+          echo "=== APPLY 002 ==="
+          patch -p1 -F3 --forward < ../kernel-patches/002-posix-mqueue-kabi.patch
+          echo "002 exit=$?"
+          echo "=== AFTER ==="
+          grep -n "ANDROID_KABI_USE(6" include/linux/sched.h || { echo "NO_SLOT6"; exit 1; }
+          grep -n "ANDROID_KABI_USE(1, unsigned long mq_bytes)" include/linux/sched/user.h || { echo "NO_MQ"; exit 1; }
+          grep -n "// struct sysv_sem\|// struct sysv_shm" include/linux/sched.h || { echo "SYSV_FIELD_NOT_COMMENTED"; exit 1; }
+          grep -n "//unsigned long mq_bytes" include/linux/sched/user.h || { echo "MQ_FIELD_NOT_COMMENTED"; exit 1; }
+          echo "KABI_PATCHES_OK"
       - name: configure
         run: |
           cd gki
