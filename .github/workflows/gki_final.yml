@@ -76,7 +76,9 @@ jobs:
         run: |
           cd gki
           # The stock device kernel reports:
-          #   Linux version 5.10.149-android12-9-o-g36dae0b389f6
+          #   vermagic recorded inside the shipped vendor modules (9 samples,
+          #   kmods/*.ko .modinfo) is exactly:
+          #     5.10.149-gki-gfaaad4fb9dbf SMP preempt mod_unload modversions aarch64
           # module loader compares vermagic as a strict string, so ANY deviation
           # (e.g. the "-dirty" that a patched tree produces) makes every vendor
           # .ko fail with "version magic mismatch" -> early boot loop, no adbd.
@@ -84,8 +86,8 @@ jobs:
           # be appended, and pin CONFIG_LOCALVERSION to the device value.
           sed -i '/^CONFIG_LOCALVERSION=/d' .config
           ./scripts/config --file .config -d LOCALVERSION_AUTO
-          echo 'CONFIG_LOCALVERSION="-android12-9-o-g36dae0b389f6"' >> .config
-          printf '#!/bin/sh\necho "-android12-9-o-g36dae0b389f6"\n' > scripts/setlocalversion
+          echo 'CONFIG_LOCALVERSION="-gki-gfaaad4fb9dbf"' >> .config
+          printf '#!/bin/sh\necho "-gki-gfaaad4fb9dbf"\n' > scripts/setlocalversion
           chmod +x scripts/setlocalversion
           rm -f include/config/kernel.release
           echo "--- kernel.release preview (regenerated at build) ---"
@@ -98,7 +100,7 @@ jobs:
           echo "--- UTS_RELEASE / vermagic gate ---"
           echo "kernel.release = $(cat include/config/kernel.release)"
           strings arch/arm64/boot/Image | grep -m1 'Linux version'
-          if [ "$(cat include/config/kernel.release)" != "5.10.149-android12-9-o-g36dae0b389f6" ]; then
+          if [ "$(cat include/config/kernel.release)" != "5.10.149-gki-gfaaad4fb9dbf" ]; then
             echo "::error::UTS_RELEASE mismatch - vendor modules would be rejected"
             exit 1
           fi
