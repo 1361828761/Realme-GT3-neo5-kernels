@@ -36,34 +36,48 @@ jobs:
           echo "--- Makefile version ---"; head -5 Makefile
           echo "--- gki_defconfig ---"; ls -la arch/arm64/configs/gki_defconfig
           echo "--- top dirs ---"; ls
-      - name: stub missing Kconfig sources
+      - name: disable unresolvable Kconfig sources
         run: |
           cd gki
           python3 - <<'PY'
-          import os,re
-          missing=set()
-          for root,dirs,files in os.walk('.'):
-              if '/.git' in root: continue
+          import os, re
+          # Kconfig 'source' paths are always relative to the tree root ($srctree).
+          # realme never published kernel/oplus_cpu/ and a few oplus Kconfigs, so
+          # any source line pointing at a missing path must be commented out.
+          # Creating empty stub FILES is unsafe here: some of those names already
+          # exist as regular files (e.g. drivers/android/oplus_binder).
+          dead = set()
+          changed = 0
+          for root, dirs, files in os.walk('.'):
+              if '/.git' in root:
+                  continue
               for fn in files:
-                  if fn=='Kconfig':
-                      fp=os.path.join(root,fn)
-                      try: txt=open(fp,encoding='utf-8',errors='replace').read()
-                      except: continue
-                      for m in re.finditer(r'^\s*source\s+"([^"]+)"', txt, re.M):
-                          tgt=m.group(1)
-                          if '$' in tgt or tgt.startswith('Kconfig.inc'): continue
-                          # Kconfig 'source' paths are relative to the TREE ROOT ($srctree),
-                          # never to the directory of the containing Kconfig file.
-                          cand=os.path.normpath(tgt)
-                          if not os.path.exists(cand):
-                              missing.add(cand)
-          print('MISSING',len(missing))
-          for m in sorted(missing):
-              print('  stub',m)
-              d=os.path.dirname(m)
-              if d: os.makedirs(d,exist_ok=True)
-              if not os.path.exists(m):
-                  open(m,'a').close()
+                  if fn != 'Kconfig':
+                      continue
+                  fp = os.path.join(root, fn)
+                  try:
+                      txt = open(fp, encoding='utf-8', errors='replace').read()
+                  except Exception:
+                      continue
+                  out = []
+                  for line in txt.split('\n'):
+                      m = re.match(r'^(\s*)source\s+"([^"]+)"\s*$', line)
+                      if m:
+                          tgt = m.group(2)
+                          if '$' in tgt:
+                              out.append(line); continue
+                          cand = os.path.normpath(tgt)
+                          if not os.path.isfile(cand):
+                              dead.add(cand)
+                              out.append(m.group(1) + '# [dead] ' + line.strip())
+                              changed += 1
+                              continue
+                      out.append(line)
+                  if out != txt.split('\n'):
+                      open(fp, 'w', encoding='utf-8').write('\n'.join(out))
+          print('dead source refs:', len(dead), 'lines commented:', changed)
+          for d in sorted(dead):
+              print('  dead', d)
           PY
       - name: force HAS_LTO_CLANG
         run: |
