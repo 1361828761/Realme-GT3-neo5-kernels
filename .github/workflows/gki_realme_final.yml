@@ -51,7 +51,7 @@ jobs:
                       except: continue
                       for m in re.finditer(r'^\s*source\s+"([^"]+)"', txt, re.M):
                           tgt=m.group(1)
-                          if tgt.startswith('$'): continue
+                          if '$' in tgt or tgt.startswith('Kconfig.inc'): continue
                           # Kconfig 'source' paths are relative to the TREE ROOT ($srctree),
                           # never to the directory of the containing Kconfig file.
                           cand=os.path.normpath(tgt)
@@ -62,7 +62,8 @@ jobs:
               print('  stub',m)
               d=os.path.dirname(m)
               if d: os.makedirs(d,exist_ok=True)
-              open(m,'a').close()
+              if not os.path.exists(m):
+                  open(m,'a').close()
           PY
       - name: force HAS_LTO_CLANG
         run: |
