@@ -124,6 +124,37 @@ jobs:
                 ./scripts/config --file .config -e $c
               done
               ;;
+            cgdevice)
+              # vJ base + CGROUP_DEVICE only
+              for c in POSIX_MQUEUE IPC_NS PID_NS DEVTMPFS CGROUP_DEVICE; do
+                ./scripts/config --file .config -e $c
+              done
+              ;;
+            cgpids)
+              # vJ base + CGROUP_PIDS only
+              for c in POSIX_MQUEUE IPC_NS PID_NS DEVTMPFS CGROUP_PIDS; do
+                ./scripts/config --file .config -e $c
+              done
+              ;;
+            tmpfs)
+              # vJ base + TMPFS_XATTR + TMPFS_POSIX_ACL only
+              for c in POSIX_MQUEUE IPC_NS PID_NS DEVTMPFS TMPFS_XATTR TMPFS_POSIX_ACL; do
+                ./scripts/config --file .config -e $c
+              done
+              ;;
+            nf)
+              # vJ base + the three netfilter extras only
+              for c in POSIX_MQUEUE IPC_NS PID_NS DEVTMPFS \
+                       NETFILTER_XT_MATCH_ADDRTYPE NETFILTER_XT_TARGET_LOG NETFILTER_XT_MATCH_RECENT; do
+                ./scripts/config --file .config -e $c
+              done
+              ;;
+            cg_all)
+              # vJ base + both cgroup extras (CGROUP_PIDS + CGROUP_DEVICE)
+              for c in POSIX_MQUEUE IPC_NS PID_NS DEVTMPFS CGROUP_PIDS CGROUP_DEVICE; do
+                ./scripts/config --file .config -e $c
+              done
+              ;;
             devtmpfs)
               for c in DEVTMPFS; do ./scripts/config --file .config -e $c; done
               ;;
